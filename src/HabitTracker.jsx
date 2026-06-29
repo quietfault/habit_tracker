@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Check, Flame, Trash2, Pencil, X, LogOut, ChevronDown, ChevronRight, BarChart3, ListChecks, FolderPlus } from "lucide-react";
+import { Plus, Check, Flame, Trash2, Pencil, X, LogOut, ChevronDown, ChevronRight, BarChart3, ListChecks, FolderPlus, ArrowUp, ArrowDown } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Stats from "./Stats.jsx";
 
@@ -8,8 +8,7 @@ const C = {
   text: "#EDEDF2", muted: "#8C8C9C", faint: "#3A3A48", gold: "#F5B544", goldHot: "#FFCB5C",
 };
 
-const ymd = (d) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const monday = (d) => { const x = new Date(d); x.setHours(0,0,0,0); const w = (x.getDay() + 6) % 7; return addDays(x, -w); };
 const last7 = () => [...Array(7)].map((_, i) => addDays(new Date(), -(6 - i)));
@@ -22,6 +21,7 @@ const TARGETS = [
   { v: 4, label: "4×/нед" }, { v: 5, label: "5×/нед" }, { v: 6, label: "6×/нед" },
 ];
 const COLLAPSE_KEY = "ht-collapsed-groups";
+const bySort = (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0);
 
 export default function HabitTracker({ session }) {
   const [groups, setGroups] = useState([]);
@@ -64,7 +64,6 @@ export default function HabitTracker({ session }) {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [load]);
 
-  // ── helpers for weekly cadence ──
   const countInWeekOf = useCallback((hid, anyDate) => {
     const m = monday(anyDate);
     let c = 0;
@@ -87,10 +86,8 @@ export default function HabitTracker({ session }) {
     return n;
   };
   const isWeekly = (h) => (h.target_per_week ?? 7) < 7;
-  const isSatisfied = (h) =>
-    isWeekly(h) ? countInWeekOf(h.id, now) >= h.target_per_week : done.has(`${h.id}|${today}`);
+  const isSatisfied = (h) => isWeekly(h) ? countInWeekOf(h.id, now) >= h.target_per_week : done.has(`${h.id}|${today}`);
 
-  // ── mutations ──
   const toggle = async (hid, ds) => {
     const key = `${hid}|${ds}`;
     const has = done.has(key);
@@ -104,8 +101,9 @@ export default function HabitTracker({ session }) {
     const name = draft.trim();
     if (!name) return;
     setDraft(""); setAdding(false);
+    const maxSort = habits.reduce((m, h) => Math.max(m, h.sort_order ?? 0), 0);
     const { data, error } = await supabase.from("habits")
-      .insert({ name, sort_order: habits.length, group_id: draftGroup || null, target_per_week: draftTarget })
+      .insert({ name, sort_order: maxSort + 1, group_id: draftGroup || null, target_per_week: draftTarget })
       .select().single();
     if (!error && data) setHabits((h) => [...h, data]);
   };
@@ -121,6 +119,24 @@ export default function HabitTracker({ session }) {
   const setHabitTarget = async (hid, t) => {
     setHabits((h) => h.map((x) => (x.id === hid ? { ...x, target_per_week: t } : x)));
     await supabase.from("habits").update({ target_per_week: t }).eq("id", hid);
+  };
+  const setHabitName = async (hid, name) => {
+    setHabits((h) => h.map((x) => (x.id === hid ? { ...x, name } : x)));
+    await supabase.from("habits").update({ name }).eq("id", hid);
+  };
+  // переставляет привычку внутри её группы (меняет sort_order с соседом)
+  const moveHabit = async (h, dir) => {
+    const sibs = habits.filter((x) => (x.group_id || null) === (h.group_id || null)).sort(bySort);
+    const i = sibs.findIndex((x) => x.id === h.id);
+    const j = i + dir;
+    if (j < 0 || j >= sibs.length) return;
+    const other = sibs[j];
+    const a = h.sort_order ?? 0, b = other.sort_order ?? 0;
+    setHabits((prev) => prev.map((x) => x.id === h.id ? { ...x, sort_order: b } : x.id === other.id ? { ...x, sort_order: a } : x));
+    await Promise.all([
+      supabase.from("habits").update({ sort_order: b }).eq("id", h.id),
+      supabase.from("habits").update({ sort_order: a }).eq("id", other.id),
+    ]);
   };
   const addGroup = async () => {
     const name = groupDraft.trim();
@@ -138,23 +154,20 @@ export default function HabitTracker({ session }) {
     setHabits((h) => h.map((x) => (x.group_id === id ? { ...x, group_id: null } : x)));
     await supabase.from("groups").delete().eq("id", id);
   };
-  const toggleCollapse = (id) => setCollapsed((prev) => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); persistCollapsed(n); return n;
-  });
+  const toggleCollapse = (id) => setCollapsed((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); persistCollapsed(n); return n; });
   const allGroupIds = groups.map((g) => g.id);
   const anyCollapsed = allGroupIds.some((id) => collapsed.has(id));
   const toggleAll = () => { const n = anyCollapsed ? new Set() : new Set(allGroupIds); setCollapsed(n); persistCollapsed(n); };
 
-  // ── daily counter (weekly habits excluded — they have their own cadence) ──
   const dailyHabits = habits.filter((h) => !isWeekly(h));
   const doneToday = dailyHabits.filter((h) => done.has(`${h.id}|${today}`)).length;
   const pct = dailyHabits.length ? Math.round((doneToday / dailyHabits.length) * 100) : 0;
   const headerDate = `${WD[now.getDay()]} · ${now.getDate()} ${MO[now.getMonth()]}`;
-  const ungrouped = habits.filter((h) => !h.group_id);
+  const ungrouped = habits.filter((h) => !h.group_id).sort(bySort);
   const hasGroups = groups.length > 0;
 
   const rowProps = { done, today, days, editing, groups, toggle, removeHabit, setHabitGroup, setHabitTarget,
-    streak, countInWeekOf, weeklyStreak, isWeekly, isSatisfied, now };
+    setHabitName, moveHabit, streak, countInWeekOf, weeklyStreak, isWeekly, isSatisfied, now };
 
   return (
     <div style={{ background: C.bg, color: C.text, minHeight: "100%" }}>
@@ -185,7 +198,7 @@ export default function HabitTracker({ session }) {
         </div>
 
         {view === "stats" ? (
-          <Stats habits={habits} done={done} />
+          <Stats habits={habits} done={done} groups={groups} />
         ) : (
           <>
             {dailyHabits.length > 0 && (
@@ -215,7 +228,7 @@ export default function HabitTracker({ session }) {
             )}
 
             {groups.map((g) => {
-              const items = habits.filter((h) => h.group_id === g.id);
+              const items = habits.filter((h) => h.group_id === g.id).sort(bySort);
               const isCol = collapsed.has(g.id);
               const ok = items.filter((h) => isSatisfied(h)).length;
               return (
@@ -235,7 +248,7 @@ export default function HabitTracker({ session }) {
                   {!isCol && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                       {items.length === 0 && <div style={{ fontSize: 13, color: C.faint, paddingLeft: 22 }}>пусто</div>}
-                      {items.map((h) => <HabitRow key={h.id} h={h} {...rowProps} />)}
+                      {items.map((h, i) => <HabitRow key={h.id} h={h} canUp={i > 0} canDown={i < items.length - 1} {...rowProps} />)}
                     </div>
                   )}
                 </div>
@@ -246,7 +259,7 @@ export default function HabitTracker({ session }) {
               <div style={{ marginBottom: 14 }}>
                 {hasGroups && <div style={{ fontWeight: 600, fontSize: 14, color: C.muted, padding: "4px 2px 8px 22px" }}>Без группы</div>}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {ungrouped.map((h) => <HabitRow key={h.id} h={h} {...rowProps} />)}
+                  {ungrouped.map((h, i) => <HabitRow key={h.id} h={h} canUp={i > 0} canDown={i < ungrouped.length - 1} {...rowProps} />)}
                 </div>
               </div>
             )}
@@ -293,7 +306,7 @@ export default function HabitTracker({ session }) {
   );
 }
 
-function HabitRow({ h, done, today, days, editing, groups, toggle, removeHabit, setHabitGroup, setHabitTarget, streak, countInWeekOf, weeklyStreak, isWeekly, isSatisfied, now }) {
+function HabitRow({ h, done, today, days, editing, groups, toggle, removeHabit, setHabitGroup, setHabitTarget, setHabitName, moveHabit, streak, countInWeekOf, weeklyStreak, isWeekly, isSatisfied, now, canUp, canDown }) {
   const weekly = isWeekly(h);
   const satisfied = isSatisfied(h);
   const todayDone = done.has(`${h.id}|${today}`);
@@ -321,36 +334,47 @@ function HabitRow({ h, done, today, days, editing, groups, toggle, removeHabit, 
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 16, background: C.surface, border: `1px solid ${satisfied ? C.gold + "55" : C.line}`, transition: "border-color .25s" }}>
+    <div style={{ display: "flex", alignItems: editing ? "stretch" : "center", gap: 12, padding: 12, borderRadius: 16, background: C.surface, border: `1px solid ${satisfied ? C.gold + "55" : C.line}`, transition: "border-color .25s" }}>
       <button onClick={() => toggle(h.id, today)} aria-label="Отметить сегодня"
         style={{ flexShrink: 0, width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 999, background: todayDone ? C.gold : "transparent", border: `2px solid ${todayDone ? C.gold : C.faint}`, cursor: "pointer", transition: "all .2s" }}>
         {todayDone && <Check size={20} strokeWidth={3} color="#1A1208" className="ht-pop" />}
       </button>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.name}</div>
-        {subtitle}
-      </div>
+
       {editing ? (
-        <div style={{ flexShrink: 0, display: "flex", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: 6, maxWidth: 190 }}>
-          <select value={h.target_per_week ?? 7} onChange={(e) => setHabitTarget(h.id, Number(e.target.value))}>
-            {TARGETS.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
-          </select>
-          <select value={h.group_id || ""} onChange={(e) => setHabitGroup(h.id, e.target.value || null)}>
-            <option value="">Без группы</option>
-            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
-          <button onClick={() => removeHabit(h.id)} aria-label="Удалить" style={{ padding: 8, borderRadius: 10, color: "#E0656B", background: C.surface2, border: "none", cursor: "pointer" }}><Trash2 size={16} /></button>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <input className="ht-input" defaultValue={h.name}
+            onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== h.name) setHabitName(h.id, v); }}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            style={{ width: "100%", boxSizing: "border-box", background: C.surface2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 8px", color: C.text, fontSize: 14, fontWeight: 500 }} />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            <select value={h.target_per_week ?? 7} onChange={(e) => setHabitTarget(h.id, Number(e.target.value))}>
+              {TARGETS.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
+            </select>
+            <select value={h.group_id || ""} onChange={(e) => setHabitGroup(h.id, e.target.value || null)}>
+              <option value="">Без группы</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+            <button onClick={() => moveHabit(h, -1)} disabled={!canUp} aria-label="Выше" style={miniBtn(!canUp)}><ArrowUp size={15} /></button>
+            <button onClick={() => moveHabit(h, 1)} disabled={!canDown} aria-label="Ниже" style={miniBtn(!canDown)}><ArrowDown size={15} /></button>
+            <button onClick={() => removeHabit(h.id)} aria-label="Удалить" style={{ padding: 7, borderRadius: 9, color: "#E0656B", background: C.surface2, border: "none", cursor: "pointer" }}><Trash2 size={15} /></button>
+          </div>
         </div>
       ) : (
-        <div style={{ flexShrink: 0, display: "flex", gap: 4 }}>
-          {days.map((d) => {
-            const ds = ymd(d);
-            const on = done.has(`${h.id}|${ds}`);
-            const isT = ds === today;
-            return <button key={ds} onClick={() => toggle(h.id, ds)} aria-label={`${WD[d.getDay()]} ${d.getDate()}`} title={`${WD[d.getDay()]} ${d.getDate()}`}
-              style={{ width: 16, height: 22, borderRadius: 6, padding: 0, background: on ? C.gold : C.surface2, border: isT ? `1.5px solid ${on ? C.goldHot : C.muted}` : `1px solid ${C.line}`, cursor: "pointer", transition: "background .2s" }} />;
-          })}
-        </div>
+        <>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.name}</div>
+            {subtitle}
+          </div>
+          <div style={{ flexShrink: 0, display: "flex", gap: 4 }}>
+            {days.map((d) => {
+              const ds = ymd(d);
+              const on = done.has(`${h.id}|${ds}`);
+              const isT = ds === today;
+              return <button key={ds} onClick={() => toggle(h.id, ds)} aria-label={`${WD[d.getDay()]} ${d.getDate()}`} title={`${WD[d.getDay()]} ${d.getDate()}`}
+                style={{ width: 16, height: 22, borderRadius: 6, padding: 0, background: on ? C.gold : C.surface2, border: isT ? `1.5px solid ${on ? C.goldHot : C.muted}` : `1px solid ${C.line}`, cursor: "pointer", transition: "background .2s" }} />;
+            })}
+          </div>
+        </>
       )}
     </div>
   );
@@ -360,5 +384,6 @@ function SegBtn({ active, onClick, icon, label }) {
   return <button onClick={onClick} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 0", borderRadius: 9, fontSize: 14, fontWeight: 500, cursor: "pointer", border: "none", background: active ? C.surface2 : "transparent", color: active ? C.text : C.muted }}>{icon} {label}</button>;
 }
 function iconBtn(color) { return { display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 500, padding: "5px 8px", borderRadius: 8, color, background: "transparent", border: "none", cursor: "pointer" }; }
+function miniBtn(disabled) { return { padding: 7, borderRadius: 9, color: disabled ? C.faint : C.text, background: C.surface2, border: `1px solid ${C.line}`, cursor: disabled ? "default" : "pointer", display: "flex", opacity: disabled ? 0.5 : 1 }; }
 function primaryBtn() { return { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 12, fontWeight: 500, fontSize: 14, background: C.gold, color: "#1A1208", border: "none", cursor: "pointer" }; }
 function dashedBtn() { return { width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "12px 0", borderRadius: 16, fontSize: 14, fontWeight: 500, color: C.muted, border: `1px dashed ${C.line}`, background: "transparent", cursor: "pointer" }; }
