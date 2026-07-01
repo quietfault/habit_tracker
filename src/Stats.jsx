@@ -154,26 +154,29 @@ export default function Stats({ habits, done, groups }) {
 
 function HeatGrid({ days, period, today, valueFor }) {
   const inRange = useMemo(() => new Set(days.map((d) => ymd(d))), [days]);
-  if (period === 7) {
+
+  if (period !== 90) {
+    const size = period === 7 ? 22 : 24;
     return (
-      <div style={{ display: "flex", gap: 4 }}>
-        {days.map((d) => <Cell key={ymd(d)} v={valueFor(d)} w={16} h={22} isT={ymd(d) === today} label={`${d.getDate()}.${d.getMonth() + 1}`} />)}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {days.map((d) => <Cell key={ymd(d)} v={valueFor(d)} size={size} isT={ymd(d) === today} label={`${d.getDate()}.${d.getMonth() + 1}`} />)}
       </div>
     );
   }
+
   const start = monday(days[0]);
   const end = new Date(); end.setHours(0, 0, 0, 0);
   const weeks = [];
   let cur = start;
   while (cur <= end) { const col = []; for (let r = 0; r < 7; r++) col.push(addDays(cur, r)); weeks.push(col); cur = addDays(cur, 7); }
   return (
-    <div style={{ display: "flex", gap: 3, overflowX: "auto" }}>
+    <div style={{ display: "flex", gap: 3, width: "100%" }}>
       {weeks.map((col, ci) => (
-        <div key={ci} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <div key={ci} style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 0 }}>
           {col.map((d) => {
             const key = ymd(d);
-            if (!inRange.has(key)) return <div key={key} style={{ width: 12, height: 12, flexShrink: 0 }} />;
-            return <Cell key={key} v={valueFor(d)} w={12} h={12} isT={key === today} label={`${d.getDate()}.${d.getMonth() + 1}`} />;
+            if (!inRange.has(key)) return <div key={key} style={{ width: "100%", aspectRatio: "1" }} />;
+            return <Cell key={key} v={valueFor(d)} stretch isT={key === today} label={`${d.getDate()}.${d.getMonth() + 1}`} />;
           })}
         </div>
       ))}
@@ -181,9 +184,10 @@ function HeatGrid({ days, period, today, valueFor }) {
   );
 }
 
-function Cell({ v, w, h, isT, label }) {
+function Cell({ v, size, stretch, isT, label }) {
   const bg = v > 0 ? `rgba(${GOLD_RGB},${(0.3 + 0.7 * Math.min(1, v)).toFixed(2)})` : C.surface2;
-  return <div title={label} style={{ width: w, height: h, borderRadius: 4, boxSizing: "border-box", flexShrink: 0, background: bg, border: isT ? `1.5px solid ${v > 0 ? C.goldHot : C.muted}` : `1px solid ${C.line}` }} />;
+  const sizeStyle = stretch ? { width: "100%", aspectRatio: "1", minWidth: 0 } : { width: size, height: size, flexShrink: 0 };
+  return <div title={label} style={{ ...sizeStyle, borderRadius: 4, boxSizing: "border-box", background: bg, border: isT ? `1.5px solid ${v > 0 ? C.goldHot : C.muted}` : `1px solid ${C.line}` }} />;
 }
 
 function card() { return { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16, padding: 14 }; }

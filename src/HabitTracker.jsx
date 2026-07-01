@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Check, Flame, Trash2, Pencil, X, LogOut, ChevronDown, ChevronRight, BarChart3, ListChecks, FolderPlus, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Check, Flame, Trash2, Pencil, X, LogOut, ChevronDown, ChevronRight, BarChart3, ListChecks, FolderPlus, ArrowUp, ArrowDown, Target } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Stats from "./Stats.jsx";
+import Goals from "./Goals.jsx";
 
 const C = {
   bg: "#131319", surface: "#1C1C24", surface2: "#23232E", line: "#2E2E3A",
@@ -195,9 +196,12 @@ export default function HabitTracker({ session }) {
         <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 12, background: C.surface, marginBottom: 20 }}>
           <SegBtn active={view === "today"} onClick={() => setView("today")} icon={<ListChecks size={15} />} label="Сегодня" />
           <SegBtn active={view === "stats"} onClick={() => setView("stats")} icon={<BarChart3 size={15} />} label="Статистика" />
+          <SegBtn active={view === "goals"} onClick={() => setView("goals")} icon={<Target size={15} />} label="Цели" />
         </div>
 
-        {view === "stats" ? (
+        {view === "goals" ? (
+          <Goals />
+        ) : view === "stats" ? (
           <Stats habits={habits} done={done} groups={groups} />
         ) : (
           <>
